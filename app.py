@@ -348,12 +348,6 @@ def parse_jitsi_room_url(value: str) -> str:
     return urllib.parse.urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.query, ""))
 
 
-def jitsi_client_room_id(room_url: str) -> str:
-    parsed = urllib.parse.urlsplit(room_url)
-    suffix = f"?{parsed.query}" if parsed.query else ""
-    return f"{parsed.netloc}{parsed.path}{suffix}"
-
-
 def is_telemost_room(value: str) -> bool:
     value = value.strip()
     return "telemost.yandex.ru" in value.lower() or bool(re.fullmatch(r"[0-9]{8,32}", value))
@@ -583,8 +577,7 @@ debug: {yaml_bool(debug)}
     write_secret_file(jitsi_yaml_path(sub_id), yaml)
     apply_jitsi_config_permissions(jitsi_yaml_path(sub_id))
     comment = clean_comment(f"{ascii_label(name)}-until-{fmt_date(expires_at)}")
-    uri_room = jitsi_client_room_id(room_url)
-    uri = f"olcrtc://jitsi?datachannel@{uri_room}#{key}${comment}\n"
+    uri = f"olcrtc://jitsi?datachannel@{room_url}#{key}${comment}\n"
     write_secret_file(jitsi_uri_path(sub_id), uri)
     write_jitsi_override(sub_id)
     state_path(sub_id, DEFAULT_CARRIER).mkdir(parents=True, exist_ok=True)

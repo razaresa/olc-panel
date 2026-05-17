@@ -43,7 +43,7 @@ def isolated_panel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def test_jitsi_client_uri_omits_url_scheme_but_server_config_keeps_it(
+def test_jitsi_client_uri_keeps_canonical_url_scheme(
     isolated_panel: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     commands: list[tuple[str, ...]] = []
@@ -73,11 +73,11 @@ def test_jitsi_client_uri_omits_url_scheme_but_server_config_keeps_it(
 
     uri = app.jitsi_uri_path(sub_id).read_text(encoding="utf-8").strip()
     assert uri == (
-        "olcrtc://jitsi?datachannel@meet.cryptopro.ru/olcrtc-panel-client"
+        "olcrtc://jitsi?datachannel@https://meet.cryptopro.ru/olcrtc-panel-client"
         "#ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         "$ivan-until-" + app.fmt_date(row["expires_at"])
     )
-    assert "datachannel@https://" not in uri
+    assert "datachannel@https://" in uri
     assert f"%{sub_id}" not in uri
 
     assert chowns == [(app.jitsi_yaml_path(sub_id), 100, 101)]

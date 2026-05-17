@@ -16,7 +16,7 @@
 Новые URI имеют вид:
 
 ```text
-olcrtc://jitsi?datachannel@meet.cryptopro.ru/<room>#<key>$<name>
+olcrtc://jitsi?datachannel@https://meet.cryptopro.ru/<room>#<key>$<name>
 ```
 
 `<key>` генерируется на сервере и не должен публиковаться.
@@ -100,6 +100,8 @@ journalctl -u 'olcrtc-jitsi@SUB_ID.service' -n 100 --no-pager
 ```
 
 Частая причина: контейнер не может прочитать `/etc/olcrtc/config.yaml`.
+
+Если в логах клиента видно `Starting olcRTC provider=wbstream`, значит импортирована старая или неправильная подписка либо используется старый клиент. Для Jitsi-подписки должно быть `provider=jitsi, transport=datachannel`; наличие `https://` в URI не является ошибкой.
 
 ## Как пользоваться
 
