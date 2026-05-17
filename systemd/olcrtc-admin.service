@@ -1,0 +1,17 @@
+[Unit]
+Description=OlcRTC subscription admin panel
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/olcrtc-admin
+ExecStart=/usr/bin/python3 /opt/olcrtc-admin/app.py serve
+Restart=always
+RestartSec=5
+
+# Optional: use an existing readable YAML as owner/group reference.
+# Environment=OLCRTC_JITSI_CONFIG_OWNER_REFERENCE=/etc/olcrtc/jitsi/reference.yaml
+
+[Install]
+WantedBy=multi-user.target

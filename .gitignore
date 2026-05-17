@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Runtime secrets and generated subscription files.
+*.env
+*.uri
+*.yaml
+admin.token
+admin.url
+subscriptions.db
+
+# Local scratch.
+tmp/
+logs/
