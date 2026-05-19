@@ -85,3 +85,56 @@ def test_jitsi_client_uri_keeps_canonical_url_scheme(
         ("daemon-reload",),
         ("enable", "--now", f"olcrtc-jitsi@{sub_id}.service"),
     ]
+
+
+def test_jitsi_subscription_writes_failover_profiles_and_uri(
+    isolated_panel: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    primary = "https://meet.cryptopro.ru/olcrtc-panel-client"
+    backup = "https://meet1.arbitr.ru/olcrtc-panel-client"
+    commands: list[tuple[str, ...]] = []
+
+    def fake_systemctl(*args: str, check: bool = True) -> SimpleNamespace:
+        commands.append(args)
+        return SimpleNamespace(stdout="active\n", stderr="", returncode=0)
+
+    monkeypatch.setattr(app, "systemctl", fake_systemctl)
+    monkeypatch.setattr(app.os, "chown", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(app.secrets, "token_hex", lambda n: "e" * (n * 2))
+    monkeypatch.setattr(
+        app,
+        "JITSI_ROOM_BASE_URLS",
+        ["https://meet.cryptopro.ru", "https://meet1.arbitr.ru"],
+        raising=False,
+    )
+    app.add_rooms(primary)
+
+    sub_id = app.create_subscription("Petr", "android", 7)
+    row = app.get_subscription(sub_id)
+    assert row is not None
+
+    env_text = app.jitsi_env_path(sub_id).read_text(encoding="utf-8")
+    assert f"OLCRTC_ROOM_ID={primary}" in env_text
+    assert f"OLCRTC_ROOM_IDS={primary},{backup}" in env_text
+
+    yaml_text = app.jitsi_yaml_path(sub_id).read_text(encoding="utf-8")
+    assert f'id: "{primary}"' in yaml_text
+    assert "profiles:" not in yaml_text
+
+    backup_id = app.jitsi_endpoint_service_id(sub_id, 2)
+    backup_env_text = app.jitsi_env_path(backup_id).read_text(encoding="utf-8")
+    assert f"OLCRTC_ROOM_ID={backup}" in backup_env_text
+    backup_yaml_text = app.jitsi_yaml_path(backup_id).read_text(encoding="utf-8")
+    assert f'id: "{backup}"' in backup_yaml_text
+
+    uri = app.jitsi_uri_path(sub_id).read_text(encoding="utf-8").strip()
+    assert uri == (
+        f"olcrtc://jitsi?datachannel@{primary},{backup}"
+        "#eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "$petr-until-" + app.fmt_date(row["expires_at"])
+    )
+    assert commands == [
+        ("daemon-reload",),
+        ("enable", "--now", f"olcrtc-jitsi@{sub_id}.service"),
+        ("enable", "--now", f"olcrtc-jitsi@{backup_id}.service"),
+    ]

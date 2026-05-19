@@ -46,6 +46,11 @@ TELEMOST_ROOM_RE = re.compile(r"(?:https?://telemost\.yandex\.ru/j/)?([0-9]{8,32
 DEFAULT_CARRIER = "jitsi"
 DEFAULT_TRANSPORT = "datachannel"
 JITSI_ROOM_BASE_URL = "https://meet.cryptopro.ru"
+JITSI_ROOM_BASE_URLS = [
+    item.strip().rstrip("/")
+    for item in os.environ.get("OLCRTC_JITSI_ROOM_BASE_URLS", JITSI_ROOM_BASE_URL).split(",")
+    if item.strip()
+]
 AUTO_ROOM_PREFIX = "olcrtc-auto"
 JITSI_CONFIG_OWNER_REFERENCE = os.environ.get("OLCRTC_JITSI_CONFIG_OWNER_REFERENCE", "")
 DEFAULT_JITSI_CONFIG_UID = 100
@@ -209,6 +214,16 @@ def jitsi_uri_path(sub_id: str) -> Path:
 def jitsi_override_path(sub_id: str) -> Path:
     validate_id(sub_id)
     return JITSI_SYSTEMD_DIR / f"olcrtc-jitsi@{sub_id}.service.d" / "override.conf"
+
+
+def jitsi_endpoint_service_id(sub_id: str, index: int) -> str:
+    validate_id(sub_id)
+    if index <= 1:
+        return sub_id
+    suffix = f"-h{index}"
+    endpoint_id = f"{sub_id[:63 - len(suffix)]}{suffix}"
+    validate_id(endpoint_id)
+    return endpoint_id
 
 
 def jitsi_config_owner_reference() -> Path:
@@ -411,6 +426,28 @@ def generated_room_url() -> str:
     return f"{JITSI_ROOM_BASE_URL}/{AUTO_ROOM_PREFIX}-{secrets.token_hex(16)}"
 
 
+def jitsi_room_candidates(room_url: str) -> list[str]:
+    room_url = parse_jitsi_room_url(room_url)
+    parsed_room = urllib.parse.urlsplit(room_url)
+    candidates = [room_url]
+    for base_url in JITSI_ROOM_BASE_URLS:
+        parsed_base = urllib.parse.urlsplit(base_url)
+        if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
+            continue
+        candidate = urllib.parse.urlunsplit(
+            (
+                parsed_base.scheme.lower(),
+                parsed_base.netloc.lower(),
+                parsed_room.path,
+                parsed_room.query,
+                "",
+            )
+        )
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
 def generate_rooms(count: int) -> tuple[int, int]:
     if count < 1 or count > 100:
         raise ValueError("room count must be 1..100")
@@ -521,6 +558,43 @@ def yaml_bool(value: str) -> str:
     return "true" if value.strip().lower() in {"1", "true", "yes", "on"} else "false"
 
 
+def jitsi_server_yaml(room_url: str, key: str, dns: str, debug: str) -> str:
+    return f"""mode: srv
+link: direct
+auth:
+  provider: jitsi
+room:
+  id: {yaml_scalar(room_url)}
+crypto:
+  key: {key}
+net:
+  transport: datachannel
+  dns: {yaml_scalar(dns)}
+liveness:
+  interval: 30s
+  timeout: 15s
+  failures: 6
+data: /usr/share/olcrtc
+debug: {yaml_bool(debug)}
+"""
+
+
+def jitsi_env_lines(room_url: str, room_urls: list[str], client_id: str, key: str, dns: str, debug: str) -> list[str]:
+    return [
+        "OLCRTC_MODE=srv",
+        "OLCRTC_AUTH=jitsi",
+        "OLCRTC_CARRIER=jitsi",
+        "OLCRTC_TRANSPORT=datachannel",
+        f"OLCRTC_ROOM_ID={room_url}",
+        f"OLCRTC_ROOM_IDS={','.join(room_urls)}",
+        f"OLCRTC_CLIENT_ID={client_id}",
+        f"OLCRTC_KEY={key}",
+        f"OLCRTC_DNS={dns}",
+        f"OLCRTC_DEBUG={debug}",
+        "",
+    ]
+
+
 def write_jitsi_override(sub_id: str) -> None:
     content = """[Service]
 ExecStart=
@@ -539,49 +613,25 @@ def write_jitsi_subscription_files(
     if not room_url:
         raise RuntimeError("нет Jitsi room URL")
     room_url = parse_jitsi_room_url(room_url)
+    room_urls = jitsi_room_candidates(room_url)
+    client_room_value = ",".join(room_urls)
     key = key or env_values.get("OLCRTC_KEY") or secrets.token_hex(32)
     dns = env_values.get("OLCRTC_DNS") or server_values.get("OLCRTC_DNS") or "1.1.1.1:53"
     debug = env_values.get("OLCRTC_DEBUG") or server_values.get("OLCRTC_DEBUG") or "true"
     client_id = sub_id
-    lines = [
-        "OLCRTC_MODE=srv",
-        "OLCRTC_AUTH=jitsi",
-        "OLCRTC_CARRIER=jitsi",
-        "OLCRTC_TRANSPORT=datachannel",
-        f"OLCRTC_ROOM_ID={room_url}",
-        f"OLCRTC_CLIENT_ID={client_id}",
-        f"OLCRTC_KEY={key}",
-        f"OLCRTC_DNS={dns}",
-        f"OLCRTC_DEBUG={debug}",
-        "",
-    ]
-    yaml = f"""mode: srv
-link: direct
-auth:
-  provider: jitsi
-room:
-  id: {yaml_scalar(room_url)}
-crypto:
-  key: {key}
-net:
-  transport: datachannel
-  dns: {yaml_scalar(dns)}
-liveness:
-  interval: 30s
-  timeout: 15s
-  failures: 6
-data: /usr/share/olcrtc
-debug: {yaml_bool(debug)}
-"""
-    write_secret_file(jitsi_env_path(sub_id), "\n".join(lines))
-    write_secret_file(jitsi_yaml_path(sub_id), yaml)
-    apply_jitsi_config_permissions(jitsi_yaml_path(sub_id))
+    for index, candidate in enumerate(room_urls, start=1):
+        service_id = jitsi_endpoint_service_id(sub_id, index)
+        lines = jitsi_env_lines(candidate, room_urls, client_id, key, dns, debug)
+        yaml = jitsi_server_yaml(candidate, key, dns, debug)
+        write_secret_file(jitsi_env_path(service_id), "\n".join(lines))
+        write_secret_file(jitsi_yaml_path(service_id), yaml)
+        apply_jitsi_config_permissions(jitsi_yaml_path(service_id))
+        write_jitsi_override(service_id)
+        state_path(service_id, DEFAULT_CARRIER).mkdir(parents=True, exist_ok=True)
+        os.chmod(state_path(service_id, DEFAULT_CARRIER), 0o700)
     comment = clean_comment(f"{ascii_label(name)}-until-{fmt_date(expires_at)}")
-    uri = f"olcrtc://jitsi?datachannel@{room_url}#{key}${comment}\n"
+    uri = f"olcrtc://jitsi?datachannel@{client_room_value}#{key}${comment}\n"
     write_secret_file(jitsi_uri_path(sub_id), uri)
-    write_jitsi_override(sub_id)
-    state_path(sub_id, DEFAULT_CARRIER).mkdir(parents=True, exist_ok=True)
-    os.chmod(state_path(sub_id, DEFAULT_CARRIER), 0o700)
     return uri.strip()
 
 
@@ -634,6 +684,29 @@ def write_subscription_files(
     return write_jitsi_subscription_files(sub_id, name, expires_at, room_id=room_id, key=key)
 
 
+def jitsi_endpoint_service_ids(sub_id: str) -> list[str]:
+    values = read_env_file(jitsi_env_path(sub_id))
+    rooms = [item.strip() for item in values.get("OLCRTC_ROOM_IDS", values.get("OLCRTC_ROOM_ID", "")).split(",") if item.strip()]
+    if not rooms:
+        return [sub_id]
+    return [jitsi_endpoint_service_id(sub_id, index) for index in range(1, len(rooms) + 1)]
+
+
+def enable_jitsi_endpoint_services(sub_id: str) -> None:
+    for service_id in jitsi_endpoint_service_ids(sub_id):
+        systemctl("enable", "--now", unit_name(service_id, DEFAULT_CARRIER))
+
+
+def disable_jitsi_endpoint_services(sub_id: str, *, check: bool = False) -> None:
+    for service_id in reversed(jitsi_endpoint_service_ids(sub_id)):
+        systemctl("disable", "--now", unit_name(service_id, DEFAULT_CARRIER), check=check)
+
+
+def restart_jitsi_endpoint_services(sub_id: str) -> None:
+    for service_id in jitsi_endpoint_service_ids(sub_id):
+        systemctl("restart", unit_name(service_id, DEFAULT_CARRIER))
+
+
 def create_subscription(name: str, note: str, days: int) -> str:
     name = name.strip()
     note = note.strip()
@@ -669,7 +742,10 @@ def create_subscription(name: str, note: str, days: int) -> str:
                 ),
             )
         reload_systemd_for_carrier(carrier)
-        systemctl("enable", "--now", unit_name(sub_id, carrier))
+        if carrier == DEFAULT_CARRIER:
+            enable_jitsi_endpoint_services(sub_id)
+        else:
+            systemctl("enable", "--now", unit_name(sub_id, carrier))
         return sub_id
     except Exception:
         release_room(sub_id)
@@ -691,7 +767,10 @@ def revoke_subscription(sub_id: str, status: str = "revoked") -> None:
     validate_id(sub_id)
     row = get_subscription(sub_id)
     carrier = row["carrier"] if row else DEFAULT_CARRIER
-    systemctl("disable", "--now", unit_name(sub_id, carrier), check=False)
+    if normalize_carrier(carrier) == DEFAULT_CARRIER:
+        disable_jitsi_endpoint_services(sub_id, check=False)
+    else:
+        systemctl("disable", "--now", unit_name(sub_id, carrier), check=False)
     release_room(sub_id)
     with db() as con:
         con.execute("UPDATE subscriptions SET status = ? WHERE id = ?", (status, sub_id))
@@ -708,7 +787,10 @@ def restore_subscription(sub_id: str) -> None:
     room_id = allocate_room(sub_id, carrier)
     write_subscription_files(sub_id, row["name"], row["expires_at"], room_id=room_id, carrier=carrier)
     reload_systemd_for_carrier(carrier)
-    systemctl("enable", "--now", unit_name(sub_id, carrier))
+    if carrier == DEFAULT_CARRIER:
+        enable_jitsi_endpoint_services(sub_id)
+    else:
+        systemctl("enable", "--now", unit_name(sub_id, carrier))
     with db() as con:
         con.execute(
             "UPDATE subscriptions SET status = 'active', carrier = ?, transport = ?, env_path = ?, uri_path = ? WHERE id = ?",
@@ -722,7 +804,10 @@ def restart_subscription(sub_id: str) -> None:
         raise ValueError("subscription not found")
     if row["status"] != "active":
         raise ValueError("only active subscriptions can be restarted")
-    systemctl("restart", unit_name(sub_id, row["carrier"]))
+    if normalize_carrier(row["carrier"]) == DEFAULT_CARRIER:
+        restart_jitsi_endpoint_services(sub_id)
+    else:
+        systemctl("restart", unit_name(sub_id, row["carrier"]))
 
 
 def extend_subscription(sub_id: str, days: int) -> None:
@@ -745,7 +830,10 @@ def extend_subscription(sub_id: str, days: int) -> None:
             (expires_at, carrier, transport, str(env_path(sub_id, carrier)), str(uri_path(sub_id, carrier)), sub_id),
         )
     reload_systemd_for_carrier(carrier)
-    systemctl("enable", "--now", unit_name(sub_id, carrier))
+    if carrier == DEFAULT_CARRIER:
+        enable_jitsi_endpoint_services(sub_id)
+    else:
+        systemctl("enable", "--now", unit_name(sub_id, carrier))
 
 
 def expire_subscriptions() -> int:
