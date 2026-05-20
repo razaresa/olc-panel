@@ -21,6 +21,8 @@ olcrtc://jitsi?datachannel@https://jitsi.etudevs.ru/<room>#<key>$<name>
 
 `<key>` генерируется на сервере и не должен публиковаться.
 
+Jitsi-хосты можно менять прямо в панели. Панель сохраняет список в `/etc/olcrtc-admin/jitsi-hosts.txt`; первый хост используется для автогенерации комнат, весь список — для failover URI новых подписок.
+
 ## Требования
 
 - Linux-сервер с systemd;

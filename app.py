@@ -31,6 +31,7 @@ DB_PATH = DATA_DIR / "subscriptions.db"
 SERVER_ENV_PATH = OLCRTC_ETC_DIR / "server.env"
 TOKEN_PATH = ETC_DIR / "admin.token"
 ADMIN_URL_PATH = ETC_DIR / "admin.url"
+JITSI_HOSTS_PATH = ETC_DIR / "jitsi-hosts.txt"
 HOST = "127.0.0.1"
 PORT = 8790
 LOCAL_TZ = ZoneInfo("Europe/Astrakhan")
@@ -422,8 +423,59 @@ def add_rooms(raw: str) -> tuple[int, int]:
     return added, skipped
 
 
+def normalize_jitsi_room_base_url(raw: str) -> str:
+    value = raw.strip().rstrip("/")
+    if not value:
+        raise ValueError("empty Jitsi host")
+    if "://" not in value:
+        value = f"https://{value}"
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        raise ValueError(f"bad Jitsi host: {raw}")
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError(f"use only Jitsi host/base URL, not room URL: {raw}")
+    return urllib.parse.urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), "", "", ""))
+
+
+def parse_jitsi_room_base_urls(raw: str) -> list[str]:
+    urls: list[str] = []
+    for item in re.split(r"[\s,]+", raw.strip()):
+        if not item:
+            continue
+        url = normalize_jitsi_room_base_url(item)
+        if url not in urls:
+            urls.append(url)
+    return urls
+
+
+def default_jitsi_room_base_urls() -> list[str]:
+    try:
+        urls = parse_jitsi_room_base_urls("\n".join(JITSI_ROOM_BASE_URLS))
+    except ValueError:
+        urls = []
+    return urls or [JITSI_ROOM_BASE_URL]
+
+
+def configured_jitsi_room_base_urls() -> list[str]:
+    if JITSI_HOSTS_PATH.exists():
+        text = JITSI_HOSTS_PATH.read_text(encoding="utf-8")
+        urls = parse_jitsi_room_base_urls(text)
+        if urls:
+            return urls
+    return default_jitsi_room_base_urls()
+
+
+def write_jitsi_room_base_urls(raw: str) -> list[str]:
+    urls = parse_jitsi_room_base_urls(raw)
+    if not urls:
+        raise ValueError("нужен хотя бы один Jitsi host")
+    write_secret_file(JITSI_HOSTS_PATH, "\n".join(urls) + "\n")
+    return urls
+
+
 def primary_jitsi_room_base_url() -> str:
-    return JITSI_ROOM_BASE_URLS[0] if JITSI_ROOM_BASE_URLS else JITSI_ROOM_BASE_URL
+    urls = configured_jitsi_room_base_urls()
+    return urls[0] if urls else JITSI_ROOM_BASE_URL
 
 
 def generated_room_url() -> str:
@@ -434,7 +486,7 @@ def jitsi_room_candidates(room_url: str) -> list[str]:
     room_url = parse_jitsi_room_url(room_url)
     parsed_room = urllib.parse.urlsplit(room_url)
     candidates = [room_url]
-    for base_url in JITSI_ROOM_BASE_URLS:
+    for base_url in configured_jitsi_room_base_urls():
         parsed_base = urllib.parse.urlsplit(base_url)
         if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
             continue
@@ -990,6 +1042,7 @@ def dashboard(token: str, message: str = "") -> bytes:
     cards = []
     room_cards = []
     token_html = html.escape(token)
+    jitsi_hosts_text = html.escape("\n".join(configured_jitsi_room_base_urls()))
     for room in rooms:
         cls = "ok" if room["status"] == "free" else "warn"
         assigned = room["assigned_subscription_id"] or "свободна"
@@ -1081,6 +1134,11 @@ def dashboard(token: str, message: str = "") -> bytes:
     <section class="card"><div class="title-row"><h2>Подписки</h2><span class="pill">всего: {len(rows)}</span></div><div class="sub-list">{''.join(cards)}</div></section>
     <section class="card stack" style="margin-top:12px">
       <div class="title-row"><h2>Jitsi комнаты</h2><div class="meta"><span class="pill ok">free: {free_rooms}</span><span class="pill warn">assigned: {assigned_rooms}</span></div></div>
+      <form method="post" action="/jitsi-hosts/save" class="room-form">
+        <input type="hidden" name="token" value="{token_html}">
+        <textarea name="hosts" placeholder="https://jitsi.etudevs.ru&#10;http://meet.small-dm.ru">{jitsi_hosts_text}</textarea>
+        <button>сохранить хосты</button>
+      </form>
       <form method="post" action="/rooms/add" class="room-form">
         <input type="hidden" name="token" value="{token_html}">
         <textarea name="rooms" placeholder="https://jitsi.etudevs.ru/olcrtc-client-one&#10;https://jitsi.etudevs.ru/olcrtc-client-two"></textarea>
@@ -1236,6 +1294,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.forbidden()
                 return
             path = urllib.parse.urlsplit(self.path).path
+            if path == "/jitsi-hosts/save":
+                urls = write_jitsi_room_base_urls(self.form_value(fields, "hosts"))
+                self.redirect("/?msg=" + urllib.parse.quote(f"Jitsi хосты сохранены: {len(urls)}"))
+                return
             if path == "/rooms/add":
                 added, skipped = add_rooms(self.form_value(fields, "rooms"))
                 self.redirect("/?msg=" + urllib.parse.quote(f"Комнат добавлено: {added}, пропущено: {skipped}"))

@@ -39,6 +39,7 @@ def isolated_panel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(app, "SERVER_ENV_PATH", olcrtc_dir / "server.env")
     monkeypatch.setattr(app, "TOKEN_PATH", etc_dir / "olcrtc-admin" / "admin.token")
     monkeypatch.setattr(app, "ADMIN_URL_PATH", etc_dir / "olcrtc-admin" / "admin.url")
+    monkeypatch.setattr(app, "JITSI_HOSTS_PATH", etc_dir / "olcrtc-admin" / "jitsi-hosts.txt", raising=False)
 
     return tmp_path
 
@@ -138,3 +139,31 @@ def test_jitsi_subscription_writes_failover_profiles_and_uri(
         ("enable", "--now", f"olcrtc-jitsi@{sub_id}.service"),
         ("enable", "--now", f"olcrtc-jitsi@{backup_id}.service"),
     ]
+
+
+def test_jitsi_hosts_can_be_saved_and_used_for_new_rooms(
+    isolated_panel: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app.secrets, "token_hex", lambda n: "a" * (n * 2))
+
+    saved = app.write_jitsi_room_base_urls("jitsi.etudevs.ru\nhttp://meet.small-dm.ru/")
+
+    assert saved == ["https://jitsi.etudevs.ru", "http://meet.small-dm.ru"]
+    assert app.configured_jitsi_room_base_urls() == saved
+    assert app.generated_room_url() == "https://jitsi.etudevs.ru/olcrtc-auto-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert app.jitsi_room_candidates("https://jitsi.etudevs.ru/olcrtc-client") == [
+        "https://jitsi.etudevs.ru/olcrtc-client",
+        "http://meet.small-dm.ru/olcrtc-client",
+    ]
+
+
+def test_dashboard_renders_editable_jitsi_hosts(
+    isolated_panel: Path,
+) -> None:
+    app.write_jitsi_room_base_urls("https://jitsi.etudevs.ru\nhttp://meet.small-dm.ru")
+
+    html = app.dashboard("token").decode("utf-8")
+
+    assert 'action="/jitsi-hosts/save"' in html
+    assert "https://jitsi.etudevs.ru" in html
+    assert "http://meet.small-dm.ru" in html
