@@ -16,7 +16,7 @@
 Новые URI имеют вид:
 
 ```text
-olcrtc://jitsi?datachannel@https://jitsi.etudevs.ru/<room>#<key>$<name>
+olcrtc://jitsi?datachannel@https://jitsi.example.org/<room>#<key>$<name>
 ```
 
 `<key>` генерируется на сервере и не должен публиковаться.
@@ -118,16 +118,16 @@ journalctl -u 'olcrtc-jitsi@SUB_ID.service' -n 100 --no-pager
 Пример верхнего поля с хостами:
 
 ```text
-https://jitsi.etudevs.ru
-http://meet.small-dm.ru
-https://zgn-y-vc01.zignotch.com
+https://jitsi.example.org
+http://meet.example.net
+https://vc.example.com
 ```
 
 Нижнее поле в блоке `Jitsi комнаты` нужно только для ручного добавления уже готовых комнат. Туда вставляют полные ссылки с именем комнаты, например:
 
 ```text
-https://jitsi.etudevs.ru/olcrtc-client-one
-https://jitsi.etudevs.ru/olcrtc-client-two
+https://jitsi.example.org/<room-name>
+https://meet.example.net/<room-name>
 ```
 
 Обычно нижнее поле трогать не нужно: достаточно сохранить хосты сверху и нажать генерацию комнат.
