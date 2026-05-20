@@ -16,7 +16,7 @@
 Новые URI имеют вид:
 
 ```text
-olcrtc://jitsi?datachannel@https://meet.cryptopro.ru/<room>#<key>$<name>
+olcrtc://jitsi?datachannel@https://jitsi.etudevs.ru/<room>#<key>$<name>
 ```
 
 `<key>` генерируется на сервере и не должен публиковаться.

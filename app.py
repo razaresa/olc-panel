@@ -45,7 +45,7 @@ DELIMITER_RE = re.compile(r"[\x00-\x1f\x7f://?@#%$<>]+")
 TELEMOST_ROOM_RE = re.compile(r"(?:https?://telemost\.yandex\.ru/j/)?([0-9]{8,32})")
 DEFAULT_CARRIER = "jitsi"
 DEFAULT_TRANSPORT = "datachannel"
-JITSI_ROOM_BASE_URL = "https://meet.cryptopro.ru"
+JITSI_ROOM_BASE_URL = "https://jitsi.etudevs.ru"
 JITSI_ROOM_BASE_URLS = [
     item.strip().rstrip("/")
     for item in os.environ.get("OLCRTC_JITSI_ROOM_BASE_URLS", JITSI_ROOM_BASE_URL).split(",")
@@ -422,8 +422,12 @@ def add_rooms(raw: str) -> tuple[int, int]:
     return added, skipped
 
 
+def primary_jitsi_room_base_url() -> str:
+    return JITSI_ROOM_BASE_URLS[0] if JITSI_ROOM_BASE_URLS else JITSI_ROOM_BASE_URL
+
+
 def generated_room_url() -> str:
-    return f"{JITSI_ROOM_BASE_URL}/{AUTO_ROOM_PREFIX}-{secrets.token_hex(16)}"
+    return f"{primary_jitsi_room_base_url()}/{AUTO_ROOM_PREFIX}-{secrets.token_hex(16)}"
 
 
 def jitsi_room_candidates(room_url: str) -> list[str]:
@@ -1079,7 +1083,7 @@ def dashboard(token: str, message: str = "") -> bytes:
       <div class="title-row"><h2>Jitsi комнаты</h2><div class="meta"><span class="pill ok">free: {free_rooms}</span><span class="pill warn">assigned: {assigned_rooms}</span></div></div>
       <form method="post" action="/rooms/add" class="room-form">
         <input type="hidden" name="token" value="{token_html}">
-        <textarea name="rooms" placeholder="https://meet.cryptopro.ru/olcrtc-client-one&#10;https://meet.cryptopro.ru/olcrtc-client-two"></textarea>
+        <textarea name="rooms" placeholder="https://jitsi.etudevs.ru/olcrtc-client-one&#10;https://jitsi.etudevs.ru/olcrtc-client-two"></textarea>
         <button>добавить</button>
       </form>
       <form method="post" action="/rooms/generate" class="room-form">

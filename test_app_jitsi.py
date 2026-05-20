@@ -59,21 +59,21 @@ def test_jitsi_client_uri_keeps_canonical_url_scheme(
     monkeypatch.setattr(app, "systemctl", fake_systemctl)
     monkeypatch.setattr(app.os, "chown", fake_chown, raising=False)
     monkeypatch.setattr(app.secrets, "token_hex", lambda n: "f" * (n * 2))
-    app.add_rooms("https://meet.cryptopro.ru/olcrtc-panel-client")
+    app.add_rooms("https://jitsi.etudevs.ru/olcrtc-panel-client")
 
     sub_id = app.create_subscription("Ivan", "android", 30)
     row = app.get_subscription(sub_id)
     assert row is not None
 
     env_text = app.jitsi_env_path(sub_id).read_text(encoding="utf-8")
-    assert "OLCRTC_ROOM_ID=https://meet.cryptopro.ru/olcrtc-panel-client" in env_text
+    assert "OLCRTC_ROOM_ID=https://jitsi.etudevs.ru/olcrtc-panel-client" in env_text
 
     yaml_text = app.jitsi_yaml_path(sub_id).read_text(encoding="utf-8")
-    assert 'id: "https://meet.cryptopro.ru/olcrtc-panel-client"' in yaml_text
+    assert 'id: "https://jitsi.etudevs.ru/olcrtc-panel-client"' in yaml_text
 
     uri = app.jitsi_uri_path(sub_id).read_text(encoding="utf-8").strip()
     assert uri == (
-        "olcrtc://jitsi?datachannel@https://meet.cryptopro.ru/olcrtc-panel-client"
+        "olcrtc://jitsi?datachannel@https://jitsi.etudevs.ru/olcrtc-panel-client"
         "#ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         "$ivan-until-" + app.fmt_date(row["expires_at"])
     )
@@ -90,8 +90,8 @@ def test_jitsi_client_uri_keeps_canonical_url_scheme(
 def test_jitsi_subscription_writes_failover_profiles_and_uri(
     isolated_panel: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    primary = "https://meet.cryptopro.ru/olcrtc-panel-client"
-    backup = "https://meet1.arbitr.ru/olcrtc-panel-client"
+    primary = "https://jitsi.etudevs.ru/olcrtc-panel-client"
+    backup = "http://meet.small-dm.ru/olcrtc-panel-client"
     commands: list[tuple[str, ...]] = []
 
     def fake_systemctl(*args: str, check: bool = True) -> SimpleNamespace:
@@ -104,7 +104,7 @@ def test_jitsi_subscription_writes_failover_profiles_and_uri(
     monkeypatch.setattr(
         app,
         "JITSI_ROOM_BASE_URLS",
-        ["https://meet.cryptopro.ru", "https://meet1.arbitr.ru"],
+        ["https://jitsi.etudevs.ru", "http://meet.small-dm.ru"],
         raising=False,
     )
     app.add_rooms(primary)
