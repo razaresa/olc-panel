@@ -167,3 +167,62 @@ def test_dashboard_renders_editable_jitsi_hosts(
     assert 'action="/jitsi-hosts/save"' in html
     assert "https://jitsi.etudevs.ru" in html
     assert "http://meet.small-dm.ru" in html
+
+
+def test_delete_subscription_removes_record_files_and_services(
+    isolated_panel: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    primary = "https://jitsi.etudevs.ru/olcrtc-panel-client"
+    backup = "http://meet.small-dm.ru/olcrtc-panel-client"
+    commands: list[tuple[str, ...]] = []
+
+    def fake_systemctl(*args: str, check: bool = True) -> SimpleNamespace:
+        commands.append(args)
+        return SimpleNamespace(stdout="active\n", stderr="", returncode=0)
+
+    monkeypatch.setattr(app, "systemctl", fake_systemctl)
+    monkeypatch.setattr(app.os, "chown", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(app.secrets, "token_hex", lambda n: "d" * (n * 2))
+    app.write_jitsi_room_base_urls("https://jitsi.etudevs.ru\nhttp://meet.small-dm.ru")
+    app.add_rooms(primary)
+
+    sub_id = app.create_subscription("Delete Me", "android", 7)
+    backup_id = app.jitsi_endpoint_service_id(sub_id, 2)
+    commands.clear()
+
+    app.delete_subscription(sub_id)
+
+    assert app.get_subscription(sub_id) is None
+    assert app.room_for_subscription(sub_id) is None
+    rooms = {row["room_id"]: row["status"] for row in app.list_rooms()}
+    assert rooms[primary] == "free"
+    assert not app.jitsi_env_path(sub_id).exists()
+    assert not app.jitsi_yaml_path(sub_id).exists()
+    assert not app.jitsi_uri_path(sub_id).exists()
+    assert not app.jitsi_env_path(backup_id).exists()
+    assert not app.jitsi_yaml_path(backup_id).exists()
+    assert not app.jitsi_override_path(sub_id).parent.exists()
+    assert not app.jitsi_override_path(backup_id).parent.exists()
+    assert not app.state_path(sub_id).exists()
+    assert not app.state_path(backup_id).exists()
+    assert commands == [
+        ("disable", "--now", f"olcrtc-jitsi@{backup_id}.service"),
+        ("disable", "--now", f"olcrtc-jitsi@{sub_id}.service"),
+        ("daemon-reload",),
+    ]
+
+
+def test_dashboard_renders_delete_action_for_subscription(
+    isolated_panel: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app, "systemctl", lambda *args, **kwargs: SimpleNamespace(stdout="active\n", stderr="", returncode=0))
+    monkeypatch.setattr(app.os, "chown", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(app.secrets, "token_hex", lambda n: "c" * (n * 2))
+    app.add_rooms("https://jitsi.etudevs.ru/olcrtc-panel-client")
+    app.create_subscription("Delete Button", "android", 7)
+
+    html = app.dashboard("token").decode("utf-8")
+
+    assert 'action="/delete"' in html
+    assert "Удалить подписку окончательно?" in html
+    assert ">удалить<" in html

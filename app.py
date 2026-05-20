@@ -301,6 +301,16 @@ def write_secret_file(path: Path, content: str) -> None:
     os.chmod(path, 0o600)
 
 
+def remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, ignore_errors=True)
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def slugify(value: str) -> str:
     value = value.lower().strip()
     value = re.sub(r"[^a-z0-9а-яё]+", "-", value, flags=re.IGNORECASE)
@@ -866,6 +876,36 @@ def restart_subscription(sub_id: str) -> None:
         systemctl("restart", unit_name(sub_id, row["carrier"]))
 
 
+def delete_subscription(sub_id: str) -> None:
+    validate_id(sub_id)
+    row = get_subscription(sub_id)
+    if not row:
+        raise ValueError("subscription not found")
+    carrier = normalize_carrier(row["carrier"])
+    if carrier == DEFAULT_CARRIER:
+        service_ids = jitsi_endpoint_service_ids(sub_id)
+        for service_id in reversed(service_ids):
+            systemctl("disable", "--now", unit_name(service_id, DEFAULT_CARRIER), check=False)
+    else:
+        service_ids = [sub_id]
+        systemctl("disable", "--now", unit_name(sub_id, carrier), check=False)
+    release_room(sub_id)
+    with db() as con:
+        con.execute("DELETE FROM subscriptions WHERE id = ?", (sub_id,))
+    if carrier == DEFAULT_CARRIER:
+        for service_id in service_ids:
+            remove_path(jitsi_env_path(service_id))
+            remove_path(jitsi_yaml_path(service_id))
+            remove_path(jitsi_override_path(service_id).parent)
+            remove_path(state_path(service_id, DEFAULT_CARRIER))
+        remove_path(jitsi_uri_path(sub_id))
+        reload_systemd_for_carrier(carrier)
+    else:
+        remove_path(legacy_env_path(sub_id))
+        remove_path(legacy_uri_path(sub_id))
+        remove_path(state_path(sub_id, carrier))
+
+
 def extend_subscription(sub_id: str, days: int) -> None:
     row = get_subscription(sub_id)
     if not row:
@@ -1065,13 +1105,22 @@ def dashboard(token: str, message: str = "") -> bytes:
         room_note = f'<span class="pill">room: {html.escape(assigned_room)}</span>' if assigned_room else ""
         carrier_note = f'<span class="pill">{html.escape(row["carrier"])} · {html.escape(row["transport"])}</span>'
         detail_url = f"/subscription/{urllib.parse.quote(row_id_raw)}"
+        delete_action = (
+            f'<form method="post" action="/delete" onsubmit="return confirm(\'Удалить подписку окончательно?\')">'
+            f'<input type="hidden" name="token" value="{token_html}"><input type="hidden" name="id" value="{row_id}">'
+            f'<button class="danger">удалить</button></form>'
+        )
         if row["status"] == "active":
             state_actions = (
                 f'<form method="post" action="/restart"><input type="hidden" name="token" value="{token_html}"><input type="hidden" name="id" value="{row_id}"><button class="secondary">рестарт</button></form>'
                 f'<form method="post" action="/revoke" onsubmit="return confirm(\'Отключить подписку?\')"><input type="hidden" name="token" value="{token_html}"><input type="hidden" name="id" value="{row_id}"><button class="danger">откл.</button></form>'
+                f'{delete_action}'
             )
         else:
-            state_actions = f'<form method="post" action="/restore"><input type="hidden" name="token" value="{token_html}"><input type="hidden" name="id" value="{row_id}"><button class="secondary">вкл.</button></form>'
+            state_actions = (
+                f'<form method="post" action="/restore"><input type="hidden" name="token" value="{token_html}"><input type="hidden" name="id" value="{row_id}"><button class="secondary">вкл.</button></form>'
+                f'{delete_action}'
+            )
         cards.append(f"""
         <article class="sub">
           <div class="sub-main">
@@ -1330,6 +1379,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/restart":
                 restart_subscription(sub_id)
                 self.redirect("/?msg=" + urllib.parse.quote("Сервис перезапущен"))
+                return
+            if path == "/delete":
+                delete_subscription(sub_id)
+                self.redirect("/?msg=" + urllib.parse.quote("Подписка удалена"))
                 return
         except Exception as exc:
             self.send_bytes(render_page("Ошибка", f"<section class='card'><h1>Ошибка</h1><p>{html.escape(str(exc))}</p><p><a href='/'>назад</a></p></section>", token=self.token()), status=500)
