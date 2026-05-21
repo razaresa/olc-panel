@@ -169,6 +169,18 @@ def test_dashboard_renders_editable_jitsi_hosts(
     assert "http://meet.small-dm.ru" in html
 
 
+def test_dashboard_shows_failover_urls_for_room_pool(
+    isolated_panel: Path,
+) -> None:
+    app.write_jitsi_room_base_urls("https://jitsi.etudevs.ru\nhttps://meet.cryptopro.ru")
+    app.add_rooms("https://jitsi.etudevs.ru/olcrtc-panel-client")
+
+    html = app.dashboard("token").decode("utf-8")
+
+    assert "hosts: 2" in html
+    assert "https://meet.cryptopro.ru/olcrtc-panel-client" in html
+
+
 def test_delete_subscription_removes_record_files_and_services(
     isolated_panel: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

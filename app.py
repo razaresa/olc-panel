@@ -1086,11 +1086,18 @@ def dashboard(token: str, message: str = "") -> bytes:
     for room in rooms:
         cls = "ok" if room["status"] == "free" else "warn"
         assigned = room["assigned_subscription_id"] or "свободна"
+        failover_urls = jitsi_room_candidates(room["url"])
+        host_names = " + ".join(html.escape(urllib.parse.urlsplit(url).netloc) for url in failover_urls)
+        host_pill = f'<span class="pill">hosts: {len(failover_urls)} · {host_names}</span>'
+        backup_links = "".join(
+            f'<a class="pill" href="{html.escape(url, quote=True)}" title="{html.escape(url, quote=True)}" target="_blank">backup: {html.escape(urllib.parse.urlsplit(url).netloc)}</a>'
+            for url in failover_urls[1:]
+        )
         room_cards.append(f"""
         <article class="sub">
           <div class="sub-main">
             <a class="sub-name" href="{html.escape(room['url'])}" target="_blank">{html.escape(room['room_id'])}</a>
-            <div class="meta"><span class="pill {cls}">{html.escape(room['status'])}</span><span class="pill">{html.escape(assigned)}</span></div>
+            <div class="meta"><span class="pill {cls}">{html.escape(room['status'])}</span><span class="pill">{html.escape(assigned)}</span>{host_pill}{backup_links}</div>
           </div>
         </article>
         """)
